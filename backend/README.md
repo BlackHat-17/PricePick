@@ -28,7 +28,6 @@ A comprehensive price tracking and monitoring system inspired by iShopBot, built
 ### Prerequisites
 
 - Python 3.8+
-- SQLite (or PostgreSQL/MySQL for production)
 
 ### Installation
 
