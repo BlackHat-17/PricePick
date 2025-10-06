@@ -5,7 +5,8 @@ Centralized settings and environment variable handling
 
 import os
 from typing import List, Optional
-from pydantic import BaseSettings, validator
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -70,20 +71,39 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Optional[str] = None
     
-    @validator("ALLOWED_ORIGINS", pre=True)
-    def parse_cors_origins(cls, v):
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            s = value.strip()
+            if not s:
+                return []
+            # Allow JSON array or comma-separated string
+            if s.startswith("[") and s.endswith("]"):
+                import json
+                try:
+                    return json.loads(s)
+                except Exception:
+                    # Fallback to comma-split if JSON invalid
+                    return [origin.strip() for origin in s.split(",") if origin.strip()]
+            return [origin.strip() for origin in s.split(",") if origin.strip()]
+        return value
     
     @property
     def DATABASE_URL(self) -> str:
         """Build database URL from individual components"""
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # Pydantic v2 settings config
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra='ignore',  # ignore unrelated env vars (e.g., FIREBASE_*)
+    )
 
 
 # Create global settings instance

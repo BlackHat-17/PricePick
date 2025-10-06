@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pricepick-backend
+    env_file:
+      - backend/.env
+    environment:
+      # Set these in your .env to point to Aiven MySQL
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      # Optional SSL CA path inside container if your Aiven instance requires it
+      DATABASE_SSL_CA: ${DATABASE_SSL_CA:-}
+      DEBUG: "false"
+      HOST: 0.0.0.0
+      PORT: 8000
+      ALLOWED_ORIGINS: '["http://localhost:3000","http://localhost:8080"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+
+
+

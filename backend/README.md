@@ -185,17 +185,32 @@ mypy .
 
 ### Docker Deployment
 
-```dockerfile
-FROM python:3.9-slim
+Quick start with Docker Compose (recommended for local dev):
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+```bash
+docker compose up --build
+```
 
-COPY . .
-EXPOSE 8000
+This starts:
+- MySQL 8.0 with database `pricepick`
+- FastAPI backend on `http://localhost:8000`
 
-CMD ["python", "main.py"]
+Environment defaults are set via `docker-compose.yml`. Update `.env` as needed; variables are read by `backend/config.py`.
+
+To rebuild after changing dependencies:
+
+```bash
+docker compose build backend && docker compose up -d backend
+```
+
+Standalone build/run without compose:
+
+```bash
+cd backend
+docker build -t pricepick-backend .
+docker run --rm -p 8000:8000 --env DB_HOST=host.docker.internal \
+  --env DB_USER=root --env DB_PASSWORD=yourpass --env DB_NAME=pricepick \
+  pricepick-backend
 ```
 
 ## Contributing

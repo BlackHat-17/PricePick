@@ -2,7 +2,7 @@
 Monitoring models for price alerts and tracking
 """
 
-from sqlalchemy import Column, Float, String, Boolean, ForeignKey, Text, Index
+from sqlalchemy import Column, Float, String, Boolean, ForeignKey, Text, Index, Integer
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.sqlite import JSON
 from .base import Base
@@ -37,7 +37,7 @@ class PriceAlert(Base):
     
     # Alert metadata
     notes = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="price_alerts")
@@ -138,7 +138,7 @@ class PriceHistory(Base):
     price_change_percentage = Column(Float, nullable=True)
     
     # Additional data
-    metadata = Column(JSON, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
     
     # Relationships
     product = relationship("Product", back_populates="price_history")

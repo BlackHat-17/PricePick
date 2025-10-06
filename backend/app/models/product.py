@@ -49,8 +49,8 @@ class Product(Base):
     title_selector = Column(String(200), nullable=True)
     availability_selector = Column(String(200), nullable=True)
     
-    # Custom fields for platform-specific data
-    metadata = Column(JSON, nullable=True)
+    # Custom fields for platform-specific data (avoid reserved attribute name)
+    extra_metadata = Column("metadata", JSON, nullable=True)
     
     # Relationships
     prices = relationship("Price", back_populates="product", cascade="all, delete-orphan")

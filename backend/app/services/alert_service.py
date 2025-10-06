@@ -50,7 +50,7 @@ class AlertService:
                 notify_push=alert_data.notify_push,
                 notify_sms=alert_data.notify_sms,
                 notes=alert_data.notes,
-                metadata=alert_data.metadata
+                extra_metadata=alert_data.metadata
             )
             
             self.db.add(alert)

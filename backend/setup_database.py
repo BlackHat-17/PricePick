@@ -78,3 +78,4 @@ if __name__ == "__main__":
     else:
         logger.error("Setup failed!")
         sys.exit(1)
+

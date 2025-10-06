@@ -32,6 +32,8 @@ pandas==2.1.4
 numpy==1.25.2
 python-dateutil==2.8.2
 pytz==2023.3
+email-validator==2.1.0
+
 
 # Monitoring and logging
 structlog==23.2.0

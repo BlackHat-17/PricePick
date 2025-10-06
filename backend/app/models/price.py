@@ -1,8 +1,7 @@
 """
 Price model for storing price history and tracking
 """
-
-from sqlalchemy import Column, Float, String, Boolean, ForeignKey, Index, Text
+from sqlalchemy import Column, Integer, Float, String, Boolean, ForeignKey, Index, Text
 from sqlalchemy.orm import relationship
 from .base import Base
 

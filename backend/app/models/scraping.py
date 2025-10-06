@@ -54,7 +54,7 @@ class ScrapingSession(Base):
     retry_count = Column(Integer, default=0, nullable=False)
     
     # Additional metadata
-    metadata = Column(JSON, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
     
     # Relationships
     product = relationship("Product", back_populates="scraping_sessions")
@@ -151,7 +151,7 @@ class ScrapingError(Base):
     
     # Error metadata
     stack_trace = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
     
     # Relationships
     scraping_session = relationship("ScrapingSession", back_populates="errors")

@@ -1,8 +1,8 @@
 """
 User model for authentication and user management
 """
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime, timedelta
@@ -58,7 +58,7 @@ class User(Base):
     
     # Additional user data
     preferences = Column(JSON, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    extra_metadata = Column("metadata", JSON, nullable=True)
     
     # Relationships
     price_alerts = relationship("PriceAlert", back_populates="user", cascade="all, delete-orphan")

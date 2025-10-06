@@ -49,7 +49,7 @@ class ProductService:
                 price_selector=product_data.price_selector,
                 title_selector=product_data.title_selector,
                 availability_selector=product_data.availability_selector,
-                metadata=product_data.metadata
+                extra_metadata=product_data.metadata
             )
             
             # Add to database
