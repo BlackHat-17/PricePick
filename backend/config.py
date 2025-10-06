@@ -20,10 +20,14 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     
-    # Database settings (must be provided via env)
-    DATABASE_URL: str
+    # Database settings
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 3306
+    DB_USER: str = "root"
+    DB_PASSWORD: str = ""
+    DB_NAME: str = "pricepick"
     DATABASE_ECHO: bool = False
-    # Optional SSL settings for MySQL (Aiven)
+    # Optional SSL settings for MySQL
     DATABASE_SSL_CA: Optional[str] = None
     
     # Security settings
@@ -52,6 +56,7 @@ class Settings(BaseSettings):
     SMTP_USERNAME: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
     SMTP_FROM_EMAIL: Optional[str] = None
+    SMTP_API_KEY: Optional[str] = None
     
     # Rate limiting
     RATE_LIMIT_REQUESTS: int = 100
@@ -71,11 +76,10 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",")]
         return v
     
-    @validator("DATABASE_URL")
-    def validate_database_url(cls, v):
-        if not v:
-            raise ValueError("DATABASE_URL is required")
-        return v
+    @property
+    def DATABASE_URL(self) -> str:
+        """Build database URL from individual components"""
+        return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
     
     class Config:
         env_file = ".env"
