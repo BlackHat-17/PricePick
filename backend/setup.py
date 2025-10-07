@@ -18,11 +18,18 @@ def run_command(command, description):
         return True
     except subprocess.CalledProcessError as e:
         print(f"❌ {description} failed: {e.stderr}")
+        print(f"Full error output: {e.output}")
+        return False
+    except PermissionError as e:
+        print(f"❌ {description} failed due to permission error: {e}\n")
+        print("🔒 Please run this script as Administrator or check your folder permissions.")
         return False
 
 def main():
     """Main setup function"""
     print("🚀 Setting up PricePick Backend...")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Does venv folder exist? {os.path.exists('venv')}")
     
     # Check Python version
     if sys.version_info < (3, 8):
@@ -31,26 +38,34 @@ def main():
     
     print(f"✅ Python {sys.version.split()[0]} detected")
     
-    # Create virtual environment
+    # Create virtual environment using venv module directly
     if not os.path.exists("venv"):
-        if not run_command("python -m venv venv", "Creating virtual environment"):
+        print("🔄 Creating virtual environment...")
+        try:
+            import venv
+            venv.create("venv", with_pip=True)
+            print("✅ Virtual environment created successfully")
+        except Exception as e:
+            print(f"❌ Creating virtual environment failed: {e}")
+            print("🔒 Please run this script as Administrator or check your folder permissions.")
             sys.exit(1)
     else:
         print("✅ Virtual environment already exists")
     
-    # Determine activation script
+    # Determine venv python executable
     if os.name == 'nt':  # Windows
+        venv_python = os.path.join('venv', 'Scripts', 'python.exe')
         activate_script = "venv\\Scripts\\activate"
-        pip_command = "venv\\Scripts\\pip"
-    else:  # Unix/Linux/MacOS
+    else:
+        venv_python = os.path.join('venv', 'bin', 'python')
         activate_script = "source venv/bin/activate"
-        pip_command = "venv/bin/pip"
-    
-    # Install dependencies
-    if not run_command(f"{pip_command} install --upgrade pip", "Upgrading pip"):
+
+    # Upgrade pip using venv python
+    if not run_command(f'"{venv_python}" -m pip install --upgrade pip', "Upgrading pip"):
         sys.exit(1)
-    
-    if not run_command(f"{pip_command} install -r requirements.txt", "Installing dependencies"):
+
+    # Install dependencies using venv python
+    if not run_command(f'"{venv_python}" -m pip install -r requirements.txt', "Installing dependencies"):
         sys.exit(1)
     
     # Create .env file if it doesn't exist
@@ -71,7 +86,7 @@ def main():
     else:
         print("   source venv/bin/activate")
     print("2. Start the server:")
-    print("   python main.py")
+    print("   .python main.py")
     print("3. Open your browser to: http://localhost:8000")
     print("4. View API docs at: http://localhost:8000/docs")
 
