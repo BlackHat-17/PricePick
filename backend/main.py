@@ -10,9 +10,9 @@ import uvicorn
 import logging
 from typing import List
 
-from app.routes import products, prices, users, monitoring, search
+from app.routes import products, prices, monitoring, search
 from app.database import init_db, get_db_session
-from app.services.price_monitor import PriceMonitorService
+from app.services.price_monitor_service import PriceMonitorService
 from app.tasks.scheduler import TaskScheduler
 from config import settings
 
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
     # Create a db session for initialization - the service manages its own sessions for operations
     db = get_db_session()
     try:
-        price_monitor = PriceMonitorService(db)
+        price_monitor = PriceMonitorService()
         app.state.price_monitor = price_monitor
     except Exception as e:
         logger.error(f"Failed to initialize price monitor service: {e}")
@@ -80,7 +80,6 @@ app.add_middleware(
 # Include routers
 app.include_router(products.router, prefix="/api/v1/products", tags=["products"])
 app.include_router(prices.router, prefix="/api/v1/prices", tags=["prices"])
-app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
 app.include_router(search.router, prefix="/api/v1", tags=["search"])
 

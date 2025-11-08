@@ -1,395 +1,317 @@
 """
-Alert service for managing price alerts and notifications
+Alert service for managing price alerts and notifications (Firestore version)
 """
 
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 import logging
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+from firebase_admin import firestore
 
-from app.models.monitoring import PriceAlert
-from app.models.product import Product
-from app.models.price import Price
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
+db = firestore.client()
 
 
 class AlertService:
     """
-    Service class for managing price alerts and notifications
+    Service class for managing price alerts and notifications using Firestore
     """
-    
-    def __init__(self, db: Session):
+class AlertService:
+    """
+    Service class for managing price alerts and notifications using Firestore
+    """
+
+    def __init__(self):
+        from app.firebase import db  # ✅ ensure initialized once and reused
         self.db = db
-        self.notification_service = NotificationService(db)
-    
-    async def create_alert(self, user_id: int, alert_data) -> PriceAlert:
+        self.notification_service = NotificationService(db)  # ✅ pass db here
+        self.alerts_ref = db.collection("alerts")
+        self.products_ref = db.collection("products")
+
+    # ---------------------------------------------------
+    # Create & Retrieve Alerts
+    # ---------------------------------------------------
+    async def create_alert(self, user_id: str, alert_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create a new price alert
+        Create a new price alert for a user
         """
         try:
-            # Validate product exists
-            product = self.db.query(Product).filter(
-                Product.id == alert_data.product_id,
-                Product.is_active == True
-            ).first()
-            
-            if not product:
+            # Verify product exists
+            product_ref = self.products_ref.document(alert_data["product_id"])
+            product_doc = product_ref.get()
+            if not product_doc.exists:
                 raise ValueError("Product not found")
-            
-            # Create alert
-            alert = PriceAlert(
-                user_id=user_id,
-                product_id=alert_data.product_id,
-                alert_type=alert_data.alert_type,
-                target_price=alert_data.target_price,
-                threshold_percentage=alert_data.threshold_percentage,
-                threshold_amount=alert_data.threshold_amount,
-                notify_email=alert_data.notify_email,
-                notify_push=alert_data.notify_push,
-                notify_sms=alert_data.notify_sms,
-                notes=alert_data.notes,
-                extra_metadata=alert_data.metadata
-            )
-            
-            self.db.add(alert)
-            self.db.commit()
-            self.db.refresh(alert)
-            
-            logger.info(f"Created price alert {alert.id} for user {user_id}")
-            return alert
-            
+
+            alert = {
+                "user_id": user_id,
+                "product_id": alert_data["product_id"],
+                "alert_type": alert_data["alert_type"],
+                "target_price": alert_data.get("target_price"),
+                "threshold_percentage": alert_data.get("threshold_percentage"),
+                "notify_email": alert_data.get("notify_email", True),
+                "notify_push": alert_data.get("notify_push", False),
+                "notify_sms": alert_data.get("notify_sms", False),
+                "notes": alert_data.get("notes", ""),
+                "is_active": True,
+                "is_triggered": False,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "last_checked": None,
+            }
+
+            alert_ref = self.alerts_ref.document()
+            alert_ref.set(alert)
+
+            logger.info(f"✅ Created alert {alert_ref.id} for user {user_id}")
+            return {"id": alert_ref.id, **alert}
+
         except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to create alert: {str(e)}")
+            logger.error(f"❌ Failed to create alert: {e}")
             raise
-    
-    async def get_alert(self, alert_id: int) -> Optional[PriceAlert]:
+
+    async def get_alert(self, alert_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get an alert by ID
+        Get a specific alert by ID
         """
         try:
-            return self.db.query(PriceAlert).filter(
-                PriceAlert.id == alert_id,
-                PriceAlert.is_active == True
-            ).first()
+            doc = self.alerts_ref.document(alert_id).get()
+            return doc.to_dict() if doc.exists else None
         except Exception as e:
-            logger.error(f"Failed to get alert {alert_id}: {str(e)}")
+            logger.error(f"Failed to fetch alert {alert_id}: {e}")
             raise
-    
-    async def list_user_alerts(
-        self, 
-        user_id: int, 
-        skip: int = 0, 
-        limit: int = 100,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> List[PriceAlert]:
+
+    async def list_user_alerts(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        List alerts for a user
+        List all active alerts for a user
         """
         try:
-            query = self.db.query(PriceAlert).filter(
-                PriceAlert.user_id == user_id,
-                PriceAlert.is_active == True
-            )
-            
-            # Apply filters
-            if filters:
-                if filters.get("is_active") is not None:
-                    query = query.filter(PriceAlert.is_active == filters["is_active"])
-                
-                if filters.get("alert_type"):
-                    query = query.filter(PriceAlert.alert_type == filters["alert_type"])
-                
-                if filters.get("product_id"):
-                    query = query.filter(PriceAlert.product_id == filters["product_id"])
-            
-            return query.offset(skip).limit(limit).all()
-            
+            alerts = self.alerts_ref.where("user_id", "==", user_id).where("is_active", "==", True).stream()
+            return [doc.to_dict() | {"id": doc.id} for doc in alerts]
         except Exception as e:
-            logger.error(f"Failed to list alerts for user {user_id}: {str(e)}")
+            logger.error(f"Failed to list alerts for {user_id}: {e}")
             raise
-    
-    async def update_alert(self, alert_id: int, alert_data) -> Optional[PriceAlert]:
-        """
-        Update an alert
-        """
+
+    # ---------------------------------------------------
+    # Update, Toggle, and Delete Alerts
+    # ---------------------------------------------------
+    async def update_alert(self, alert_id: str, alert_data: Dict[str, Any]) -> bool:
         try:
-            alert = await self.get_alert(alert_id)
-            if not alert:
-                return None
-            
-            # Update fields
-            update_data = alert_data.dict(exclude_unset=True)
-            for field, value in update_data.items():
-                if hasattr(alert, field):
-                    setattr(alert, field, value)
-            
-            self.db.commit()
-            self.db.refresh(alert)
-            
+            update_data = {**alert_data, "updated_at": datetime.utcnow()}
+            self.alerts_ref.document(alert_id).update(update_data)
             logger.info(f"Updated alert {alert_id}")
-            return alert
-            
+            return True
         except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to update alert {alert_id}: {str(e)}")
-            raise
-    
-    async def delete_alert(self, alert_id: int) -> bool:
-        """
-        Delete an alert (soft delete)
-        """
+            logger.error(f"Failed to update alert {alert_id}: {e}")
+            return False
+
+    async def toggle_alert(self, alert_id: str, is_active: bool) -> bool:
         try:
-            alert = await self.get_alert(alert_id)
-            if not alert:
-                return False
-            
-            alert.is_active = False
-            self.db.commit()
-            
+            self.alerts_ref.document(alert_id).update({"is_active": is_active, "updated_at": datetime.utcnow()})
+            logger.info(f"Toggled alert {alert_id} to {is_active}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to toggle alert {alert_id}: {e}")
+            return False
+
+    async def delete_alert(self, alert_id: str) -> bool:
+        try:
+            self.alerts_ref.document(alert_id).delete()
             logger.info(f"Deleted alert {alert_id}")
             return True
-            
         except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to delete alert {alert_id}: {str(e)}")
-            raise
-    
-    async def toggle_alert(self, alert_id: int, is_active: bool) -> bool:
+            logger.error(f"Failed to delete alert {alert_id}: {e}")
+            return False
+
+    # ---------------------------------------------------
+    # Core Alert Checking Logic
+    # ---------------------------------------------------
+    async def check_price_alerts(self, product_id: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
         """
-        Toggle alert active status
+        Check all active price alerts and trigger notifications if needed
         """
         try:
-            alert = await self.get_alert(alert_id)
-            if not alert:
-                return False
-            
-            alert.is_active = is_active
-            self.db.commit()
-            
-            logger.info(f"Toggled alert {alert_id}: {is_active}")
-            return True
-            
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to toggle alert {alert_id}: {str(e)}")
-            raise
-    
-    async def check_price_alerts(self, product_id: Optional[int] = None, force: bool = False) -> Dict[str, Any]:
-        """
-        Check all price alerts and trigger notifications
-        """
-        try:
-            # Get alerts to check
             if product_id:
-                alerts = self.db.query(PriceAlert).filter(
-                    PriceAlert.product_id == product_id,
-                    PriceAlert.is_active == True
-                ).all()
+                alerts = self.alerts_ref.where("product_id", "==", product_id).where("is_active", "==", True).stream()
             else:
-                alerts = self.db.query(PriceAlert).filter(
-                    PriceAlert.is_active == True
-                ).all()
-            
+                alerts = self.alerts_ref.where("is_active", "==", True).stream()
+
             checked_count = 0
             triggered_count = 0
-            
-            for alert in alerts:
-                try:
-                    # Check if alert should be checked
-                    if not force and not self._should_check_alert(alert):
-                        continue
-                    
-                    # Get current product price
-                    product = self.db.query(Product).filter(
-                        Product.id == alert.product_id
-                    ).first()
-                    
-                    if not product or not product.current_price:
-                        continue
-                    
-                    # Check if alert should trigger
-                    if alert.should_trigger(product.current_price):
-                        # Trigger alert
-                        await self._trigger_alert(alert, product)
-                        triggered_count += 1
-                    
-                    # Update last checked time
-                    alert.last_checked = datetime.utcnow().isoformat()
-                    checked_count += 1
-                    
-                except Exception as e:
-                    logger.error(f"Failed to check alert {alert.id}: {str(e)}")
+
+            for alert_doc in alerts:
+                alert = alert_doc.to_dict()
+                alert_id = alert_doc.id
+
+                if not force and not self._should_check_alert(alert):
                     continue
-            
-            self.db.commit()
-            
+
+                product_doc = self.products_ref.document(alert["product_id"]).get()
+                if not product_doc.exists:
+                    continue
+
+                product = product_doc.to_dict()
+                current_price = product.get("current_price")
+                if current_price is None:
+                    continue
+
+                # Determine trigger condition
+                if await self._should_trigger(alert, current_price):
+                    await self._trigger_alert(alert_id, alert, product)
+                    triggered_count += 1
+
+                # Update last_checked
+                self.alerts_ref.document(alert_id).update({"last_checked": datetime.utcnow()})
+                checked_count += 1
+
             logger.info(f"Checked {checked_count} alerts, triggered {triggered_count}")
             return {
                 "checked_count": checked_count,
                 "triggered_count": triggered_count,
-                "success": True
+                "success": True,
             }
-            
+
         except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to check price alerts: {str(e)}")
-            raise
-    
-    async def check_product_alerts(self, product_id: int) -> List[Dict[str, Any]]:
+            logger.error(f"Failed to check price alerts: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def check_product_alerts(self, product_id: str) -> List[Dict[str, Any]]:
         """
-        Check alerts for a specific product
+        Check and trigger alerts for a single product
         """
         try:
-            # Get product
-            product = self.db.query(Product).filter(Product.id == product_id).first()
-            if not product or not product.current_price:
+            product_doc = self.products_ref.document(product_id).get()
+            if not product_doc.exists:
                 return []
-            
-            # Get active alerts for this product
-            alerts = self.db.query(PriceAlert).filter(
-                PriceAlert.product_id == product_id,
-                PriceAlert.is_active == True
-            ).all()
-            
+
+            product = product_doc.to_dict()
+            current_price = product.get("current_price")
+            if current_price is None:
+                return []
+
+            alerts = self.alerts_ref.where("product_id", "==", product_id).where("is_active", "==", True).stream()
+
             triggered_alerts = []
-            
-            for alert in alerts:
-                try:
-                    if alert.should_trigger(product.current_price):
-                        # Trigger alert
-                        result = await self._trigger_alert(alert, product)
-                        triggered_alerts.append(result)
-                    
-                    # Update last checked time
-                    alert.last_checked = datetime.utcnow().isoformat()
-                    
-                except Exception as e:
-                    logger.error(f"Failed to check alert {alert.id}: {str(e)}")
-                    continue
-            
-            self.db.commit()
+            for alert_doc in alerts:
+                alert = alert_doc.to_dict()
+                alert_id = alert_doc.id
+
+                if await self._should_trigger(alert, current_price):
+                    result = await self._trigger_alert(alert_id, alert, product)
+                    triggered_alerts.append(result)
+
             return triggered_alerts
-            
         except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to check product alerts for {product_id}: {str(e)}")
-            raise
-    
-    def _should_check_alert(self, alert: PriceAlert) -> bool:
+            logger.error(f"Failed to check product alerts for {product_id}: {e}")
+            return []
+
+    # ---------------------------------------------------
+    # Helper Methods
+    # ---------------------------------------------------
+    def _should_check_alert(self, alert: Dict[str, Any]) -> bool:
         """
-        Check if an alert should be checked now
+        Determine if an alert should be checked (every 60 mins)
         """
-        if not alert.last_checked:
+        last_checked = alert.get("last_checked")
+        if not last_checked:
             return True
-        
-        try:
-            last_checked = datetime.fromisoformat(alert.last_checked.replace('Z', '+00:00'))
-            time_since_check = datetime.utcnow() - last_checked
-            
-            # Check every hour for active alerts
-            return time_since_check.total_seconds() >= 3600
-            
-        except (ValueError, TypeError):
-            return True
-    
-    async def _trigger_alert(self, alert: PriceAlert, product: Product) -> Dict[str, Any]:
+
+        if isinstance(last_checked, datetime):
+            time_since = datetime.utcnow() - last_checked
+            return time_since.total_seconds() >= 3600
+        return True
+
+    async def _should_trigger(self, alert: Dict[str, Any], current_price: float) -> bool:
+        """
+        Evaluate alert condition
+        """
+        alert_type = alert.get("alert_type")
+        target_price = alert.get("target_price")
+        threshold = alert.get("threshold_percentage")
+
+        if alert_type == "target_price" and target_price is not None:
+            return current_price <= target_price
+
+        if alert_type == "price_drop" and threshold is not None:
+            return current_price <= (1 - threshold / 100) * alert.get("previous_price", current_price)
+
+        if alert_type == "price_increase" and threshold is not None:
+            return current_price >= (1 + threshold / 100) * alert.get("previous_price", current_price)
+
+        return False
+
+    async def _trigger_alert(self, alert_id: str, alert: Dict[str, Any], product: Dict[str, Any]) -> Dict[str, Any]:
         """
         Trigger an alert and send notifications
         """
         try:
-            # Mark alert as triggered
-            alert.trigger()
-            
-            # Get price history for context
-            previous_price = self.db.query(Price).filter(
-                Price.product_id == product.id
-            ).order_by(Price.created_at.desc()).offset(1).first()
-            
-            # Prepare notification data
+            now = datetime.utcnow()
+            alert_update = {
+                "is_triggered": True,
+                "triggered_at": now,
+                "updated_at": now,
+            }
+            self.alerts_ref.document(alert_id).update(alert_update)
+
             notification_data = {
-                "alert_id": alert.id,
-                "product_id": product.id,
-                "product_name": product.name,
-                "product_url": product.product_url,
-                "current_price": product.current_price,
-                "previous_price": previous_price.price if previous_price else product.current_price,
-                "alert_type": alert.alert_type,
-                "target_price": alert.target_price,
-                "currency": product.currency
+                "alert_id": alert_id,
+                "product_id": alert["product_id"],
+                "product_name": product.get("name"),
+                "product_url": product.get("product_url"),
+                "current_price": product.get("current_price"),
+                "alert_type": alert.get("alert_type"),
+                "target_price": alert.get("target_price"),
+                "currency": product.get("currency", "USD"),
+                "triggered_at": now.isoformat(),
             }
-            
-            # Calculate savings/increase
-            if previous_price and previous_price.price:
-                change_amount = product.current_price - previous_price.price
-                change_percentage = (change_amount / previous_price.price) * 100
-                
-                notification_data.update({
-                    "change_amount": change_amount,
-                    "change_percentage": change_percentage,
-                    "savings": abs(change_amount) if change_amount < 0 else 0,
-                    "increase": change_amount if change_amount > 0 else 0
-                })
-            
+
             # Send notifications
-            if alert.notify_email:
+            if alert.get("notify_email"):
                 await self.notification_service.send_email_alert(alert, notification_data)
-            
-            if alert.notify_push:
+            if alert.get("notify_push"):
                 await self.notification_service.send_push_alert(alert, notification_data)
-            
-            if alert.notify_sms:
+            if alert.get("notify_sms"):
                 await self.notification_service.send_sms_alert(alert, notification_data)
-            
-            logger.info(f"Triggered alert {alert.id} for product {product.id}")
-            
-            return {
-                "alert_id": alert.id,
-                "product_id": product.id,
-                "triggered_at": datetime.utcnow().isoformat(),
-                "notifications_sent": {
-                    "email": alert.notify_email,
-                    "push": alert.notify_push,
-                    "sms": alert.notify_sms
-                }
-            }
-            
+
+            logger.info(f"🔔 Triggered alert {alert_id} for product {alert['product_id']}")
+            return notification_data
+
         except Exception as e:
-            logger.error(f"Failed to trigger alert {alert.id}: {str(e)}")
-            raise
-    
-    async def get_alert_stats(self, user_id: Optional[int] = None) -> Dict[str, Any]:
+            logger.error(f"Failed to trigger alert {alert_id}: {e}")
+            return {}
+
+    async def get_alert_stats(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Get alert statistics
+        Compute alert statistics for all users or a specific user
         """
         try:
-            query = self.db.query(PriceAlert)
-            
             if user_id:
-                query = query.filter(PriceAlert.user_id == user_id)
-            
-            total_alerts = query.count()
-            active_alerts = query.filter(PriceAlert.is_active == True).count()
-            triggered_alerts = query.filter(PriceAlert.is_triggered == True).count()
-            
-            # Count by type
-            price_drop_alerts = query.filter(PriceAlert.alert_type == "price_drop").count()
-            price_increase_alerts = query.filter(PriceAlert.alert_type == "price_increase").count()
-            target_price_alerts = query.filter(PriceAlert.alert_type == "target_price").count()
-            
+                alerts = self.alerts_ref.where("user_id", "==", user_id).stream()
+            else:
+                alerts = self.alerts_ref.stream()
+
+            total_alerts = 0
+            active_alerts = 0
+            triggered_alerts = 0
+            by_type = {"price_drop": 0, "price_increase": 0, "target_price": 0}
+
+            for doc in alerts:
+                alert = doc.to_dict()
+                total_alerts += 1
+                if alert.get("is_active"):
+                    active_alerts += 1
+                if alert.get("is_triggered"):
+                    triggered_alerts += 1
+                if alert.get("alert_type") in by_type:
+                    by_type[alert["alert_type"]] += 1
+
             return {
                 "total_alerts": total_alerts,
                 "active_alerts": active_alerts,
                 "triggered_alerts": triggered_alerts,
-                "by_type": {
-                    "price_drop": price_drop_alerts,
-                    "price_increase": price_increase_alerts,
-                    "target_price": target_price_alerts
-                }
+                "by_type": by_type,
             }
-            
+
         except Exception as e:
-            logger.error(f"Failed to get alert stats: {str(e)}")
+            logger.error(f"Failed to compute alert stats: {e}")
             return {}

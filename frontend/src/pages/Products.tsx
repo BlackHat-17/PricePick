@@ -5,17 +5,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, Plus, TrendingDown, TrendingUp, ExternalLink } from "lucide-react";
+import {
+  Search,
+  Plus,
+  TrendingDown,
+  TrendingUp,
+  ExternalLink,
+  Package,
+} from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { productsApi, Product } from "@/lib/api";
 
 const Products = () => {
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Fetch products with search
+  // Fetch products (uses your api.ts)
   const { data, isLoading, error } = useQuery({
     queryKey: ["products", { search: searchQuery || undefined }],
-    queryFn: () => productsApi.list({ search: searchQuery || undefined, limit: 50 }),
+    queryFn: () =>
+      productsApi.list({
+        search: searchQuery || undefined,
+        limit: 50,
+      }),
   });
 
   const products = data?.items || [];
@@ -24,7 +35,7 @@ const Products = () => {
     if (!price) return "N/A";
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: currency,
+      currency,
     }).format(price);
   };
 
@@ -34,10 +45,12 @@ const Products = () => {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold tracking-tight mb-2">Products</h1>
-          <p className="text-muted-foreground">Manage and track your product prices</p>
+          <p className="text-muted-foreground">
+            Manage and track your product prices
+          </p>
         </div>
 
-        {/* Search and Actions */}
+        {/* Search + Add */}
         <div className="mb-8 flex flex-col md:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -68,7 +81,7 @@ const Products = () => {
         {/* Loading State */}
         {isLoading && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
+            {[...Array(6)].map((_, i) => (
               <Card key={i} className="overflow-hidden">
                 <Skeleton className="aspect-square w-full" />
                 <div className="p-6 space-y-2">
@@ -85,10 +98,13 @@ const Products = () => {
         {!isLoading && products.length > 0 && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {products.map((product: Product) => {
-              const priceChange = product.current_price ? 0 : 0; // TODO: Calculate from price history
-              
+              const priceChange = 0; // Placeholder for future trend logic
+
               return (
-                <Card key={product.id} className="overflow-hidden hover:shadow-lg transition-shadow">
+                <Card
+                  key={product.id}
+                  className="overflow-hidden hover:shadow-lg transition-shadow"
+                >
                   <div className="aspect-square relative bg-muted">
                     {product.image_url ? (
                       <img
@@ -96,7 +112,8 @@ const Products = () => {
                         alt={product.name}
                         className="h-full w-full object-cover"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).src = "https://via.placeholder.com/400";
+                          (e.target as HTMLImageElement).src =
+                            "https://via.placeholder.com/400";
                         }}
                       />
                     ) : (
@@ -113,6 +130,7 @@ const Products = () => {
                       </Badge>
                     )}
                   </div>
+
                   <div className="p-6">
                     <div className="mb-2">
                       {product.category && (
@@ -120,9 +138,13 @@ const Products = () => {
                           {product.category}
                         </Badge>
                       )}
-                      <h3 className="font-semibold line-clamp-2 mb-1">{product.name}</h3>
+                      <h3 className="font-semibold line-clamp-2 mb-1">
+                        {product.name}
+                      </h3>
                       {product.brand && (
-                        <p className="text-sm text-muted-foreground">{product.brand}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {product.brand}
+                        </p>
                       )}
                     </div>
 
@@ -154,12 +176,16 @@ const Products = () => {
 
                     <div className="flex gap-2">
                       <Button className="flex-1" size="sm" asChild>
-                        <NavLink to={`/products/${product.id}`}>View Details</NavLink>
+                        <NavLink to={`/products/${product.id}`}>
+                          View Details
+                        </NavLink>
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => window.open(product.product_url, "_blank")}
+                        onClick={() =>
+                          window.open(product.product_url, "_blank")
+                        }
                       >
                         <ExternalLink className="h-4 w-4" />
                       </Button>

@@ -1,424 +1,284 @@
 """
-Monitoring service for price tracking and analytics
+Monitoring service for price tracking and analytics (Firebase Firestore version)
 """
 
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, asc, func
+from firebase_admin import firestore
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 import logging
-
-from app.models.monitoring import PriceAlert, PriceHistory
-from app.models.product import Product
-from app.models.price import Price
-from app.models.user import User
+import statistics
 
 logger = logging.getLogger(__name__)
+db = firestore.client()
 
 
 class MonitoringService:
     """
-    Service class for monitoring and analytics operations
+    Firebase Firestore-based Monitoring & Analytics Service
     """
-    
-    def __init__(self, db: Session):
-        self.db = db
-    
+
+    def __init__(self):
+        self.products_ref = db.collection("products")
+        self.prices_ref = db.collection("prices")
+        self.alerts_ref = db.collection("alerts")
+        self.users_ref = db.collection("users")
+
+    # -----------------------------
+    # Product Price History
+    # -----------------------------
     async def get_product_price_history(
-        self, 
-        product_id: int, 
-        days: int = 30, 
-        limit: int = 100
-    ) -> Tuple[List[PriceHistory], Dict[str, Any]]:
+        self, product_id: str, days: int = 30, limit: int = 100
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Get price history for a product
+        Get price history for a product (from Firestore)
         """
         try:
-            # Calculate date range
             end_date = datetime.utcnow()
             start_date = end_date - timedelta(days=days)
-            
-            # Get price history
-            history = self.db.query(PriceHistory).filter(
-                and_(
-                    PriceHistory.product_id == product_id,
-                    PriceHistory.created_at >= start_date,
-                    PriceHistory.created_at <= end_date,
-                    PriceHistory.is_active == True
-                )
-            ).order_by(desc(PriceHistory.created_at)).limit(limit).all()
-            
-            # Calculate statistics
+
+            query = (
+                self.prices_ref.where("product_id", "==", product_id)
+                .order_by("created_at", direction=firestore.Query.DESCENDING)
+                .limit(limit)
+            )
+            docs = query.stream()
+            history = []
+            for doc in docs:
+                data = doc.to_dict()
+                created_at = data.get("created_at")
+                if created_at and isinstance(created_at, datetime):
+                    if start_date <= created_at <= end_date:
+                        history.append(data)
+
             stats = await self._calculate_history_stats(history)
-            
             return history, stats
-            
+
         except Exception as e:
-            logger.error(f"Failed to get price history for product {product_id}: {str(e)}")
+            logger.error(f"Failed to get Firestore price history: {e}")
             raise
-    
-    async def _calculate_history_stats(self, history: List[PriceHistory]) -> Dict[str, Any]:
+
+    async def _calculate_history_stats(
+        self, history: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
-        Calculate statistics from price history
+        Calculate price statistics from Firestore price history
         """
-        try:
-            if not history:
-                return {
-                    "total_records": 0,
-                    "min_price": None,
-                    "max_price": None,
-                    "avg_price": None,
-                    "price_trend": "unknown",
-                    "volatility": 0.0
-                }
-            
-            # Extract price values
-            price_values = [h.price for h in history if h.price is not None]
-            
-            if not price_values:
-                return {
-                    "total_records": len(history),
-                    "min_price": None,
-                    "max_price": None,
-                    "avg_price": None,
-                    "price_trend": "unknown",
-                    "volatility": 0.0
-                }
-            
-            # Calculate basic statistics
-            min_price = min(price_values)
-            max_price = max(price_values)
-            avg_price = sum(price_values) / len(price_values)
-            
-            # Calculate trend
-            if len(price_values) >= 2:
-                first_price = price_values[-1]  # Oldest price
-                last_price = price_values[0]   # Newest price
-                
-                if last_price > first_price * 1.05:  # 5% increase
-                    trend = "increasing"
-                elif last_price < first_price * 0.95:  # 5% decrease
-                    trend = "decreasing"
-                else:
-                    trend = "stable"
-            else:
-                trend = "unknown"
-            
-            # Calculate volatility (standard deviation)
-            if len(price_values) > 1:
-                variance = sum((x - avg_price) ** 2 for x in price_values) / len(price_values)
-                volatility = variance ** 0.5
-            else:
-                volatility = 0.0
-            
+        if not history:
+            return {
+                "total_records": 0,
+                "min_price": None,
+                "max_price": None,
+                "avg_price": None,
+                "price_trend": "unknown",
+                "volatility": 0.0,
+            }
+
+        prices = [h["price"] for h in history if "price" in h and h["price"]]
+        if not prices:
             return {
                 "total_records": len(history),
-                "min_price": min_price,
-                "max_price": max_price,
-                "avg_price": round(avg_price, 2),
-                "price_trend": trend,
-                "volatility": round(volatility, 2)
+                "min_price": None,
+                "max_price": None,
+                "avg_price": None,
+                "price_trend": "unknown",
+                "volatility": 0.0,
             }
-            
-        except Exception as e:
-            logger.error(f"Failed to calculate history stats: {str(e)}")
-            return {}
-    
-    async def get_user_monitoring_stats(self, user_id: int) -> Dict[str, Any]:
+
+        min_p, max_p, avg_p = min(prices), max(prices), sum(prices) / len(prices)
+        first_p, last_p = prices[-1], prices[0]
+        trend = (
+            "increasing"
+            if last_p > first_p * 1.05
+            else "decreasing"
+            if last_p < first_p * 0.95
+            else "stable"
+        )
+        volatility = statistics.pstdev(prices) if len(prices) > 1 else 0.0
+
+        return {
+            "total_records": len(history),
+            "min_price": min_p,
+            "max_price": max_p,
+            "avg_price": round(avg_p, 2),
+            "price_trend": trend,
+            "volatility": round(volatility, 2),
+        }
+
+    # -----------------------------
+    # User Monitoring Statistics
+    # -----------------------------
+    async def get_user_monitoring_stats(self, user_id: str) -> Dict[str, Any]:
         """
-        Get monitoring statistics for a user
+        Get monitoring summary for a Firebase user
         """
         try:
-            # Count user's alerts
-            total_alerts = self.db.query(PriceAlert).filter(
-                PriceAlert.user_id == user_id
-            ).count()
-            
-            active_alerts = self.db.query(PriceAlert).filter(
-                and_(
-                    PriceAlert.user_id == user_id,
-                    PriceAlert.is_active == True
-                )
-            ).count()
-            
-            triggered_alerts = self.db.query(PriceAlert).filter(
-                and_(
-                    PriceAlert.user_id == user_id,
-                    PriceAlert.is_triggered == True
-                )
-            ).count()
-            
-            # Count user's products being tracked
-            tracked_products = self.db.query(Product).filter(
-                and_(
-                    Product.is_active == True,
-                    Product.is_tracking == True,
-                    Product.id.in_(
-                        self.db.query(PriceAlert.product_id).filter(
-                            PriceAlert.user_id == user_id
-                        )
-                    )
-                )
-            ).count()
-            
-            # Count recent price changes for user's products
+            # Alerts
+            alerts = [
+                doc.to_dict()
+                for doc in self.alerts_ref.where("user_id", "==", user_id).stream()
+            ]
+            total_alerts = len(alerts)
+            active_alerts = len([a for a in alerts if a.get("is_active")])
+            triggered_alerts = len([a for a in alerts if a.get("is_triggered")])
+
+            # Products being tracked
+            tracked = [
+                doc.to_dict()
+                for doc in self.products_ref.where("is_tracking", "==", True).stream()
+            ]
+            tracked_products = len(tracked)
+
+            # Recent price changes (last 7 days)
             recent_cutoff = datetime.utcnow() - timedelta(days=7)
-            recent_changes = self.db.query(Price).filter(
-                and_(
-                    Price.product_id.in_(
-                        self.db.query(PriceAlert.product_id).filter(
-                            PriceAlert.user_id == user_id
-                        )
-                    ),
-                    Price.created_at >= recent_cutoff
-                )
-            ).count()
-            
-            # Count alerts by type
-            alert_types = self.db.query(
-                PriceAlert.alert_type,
-                func.count(PriceAlert.id).label('count')
-            ).filter(
-                and_(
-                    PriceAlert.user_id == user_id,
-                    PriceAlert.is_active == True
-                )
-            ).group_by(PriceAlert.alert_type).all()
-            
-            alert_type_counts = {alert_type: count for alert_type, count in alert_types}
-            
+            prices = [
+                doc.to_dict()
+                for doc in self.prices_ref.stream()
+                if doc.to_dict().get("created_at")
+                and doc.to_dict()["created_at"] >= recent_cutoff
+            ]
+            recent_changes = len(prices)
+
+            # Alerts by type
+            alert_type_counts: Dict[str, int] = {}
+            for a in alerts:
+                t = a.get("alert_type", "unknown")
+                alert_type_counts[t] = alert_type_counts.get(t, 0) + 1
+
             return {
                 "total_alerts": total_alerts,
                 "active_alerts": active_alerts,
                 "triggered_alerts": triggered_alerts,
                 "tracked_products": tracked_products,
                 "recent_price_changes": recent_changes,
-                "alert_types": alert_type_counts
+                "alert_types": alert_type_counts,
             }
-            
+
         except Exception as e:
-            logger.error(f"Failed to get monitoring stats for user {user_id}: {str(e)}")
+            logger.error(f"Failed to get monitoring stats for user {user_id}: {e}")
             return {}
-    
+
+    # -----------------------------
+    # Price Change Trends
+    # -----------------------------
     async def get_price_change_trends(
-        self, 
-        days: int = 7,
-        threshold_percentage: float = 5.0,
-        limit: int = 50
+        self, days: int = 7, threshold_percentage: float = 5.0, limit: int = 50
     ) -> List[Dict[str, Any]]:
         """
-        Get price change trends across all products
+        Get products with significant price changes in last N days
         """
         try:
-            # Calculate date range
             end_date = datetime.utcnow()
             start_date = end_date - timedelta(days=days)
-            
-            # Get products with significant price changes
-            query = self.db.query(
-                Product.id,
-                Product.name,
-                Product.platform,
-                Product.category,
-                Product.current_price,
-                Product.original_price,
-                func.count(Price.id).label('price_count'),
-                func.avg(Price.price).label('avg_price')
-            ).join(Price, Product.id == Price.product_id).filter(
-                and_(
-                    Price.created_at >= start_date,
-                    Price.created_at <= end_date,
-                    Price.is_active == True,
-                    Product.is_active == True,
-                    Product.current_price.isnot(None),
-                    Product.original_price.isnot(None)
-                )
-            ).group_by(
-                Product.id, Product.name, Product.platform, 
-                Product.category, Product.current_price, Product.original_price
-            ).having(
-                func.abs(Product.current_price - Product.original_price) / Product.original_price * 100 >= threshold_percentage
-            ).order_by(
-                desc(func.abs(Product.current_price - Product.original_price) / Product.original_price * 100)
-            ).limit(limit)
-            
-            results = query.all()
-            
-            # Format results
+
+            products = [doc.to_dict() for doc in self.products_ref.stream()]
             trends = []
-            for result in results:
-                change_amount = result.current_price - result.original_price
-                change_percentage = (change_amount / result.original_price) * 100
-                
-                trends.append({
-                    "product_id": result.id,
-                    "product_name": result.name,
-                    "platform": result.platform,
-                    "category": result.category,
-                    "current_price": result.current_price,
-                    "original_price": result.original_price,
-                    "change_amount": round(change_amount, 2),
-                    "change_percentage": round(change_percentage, 2),
-                    "price_count": result.price_count,
-                    "avg_price": round(result.avg_price, 2) if result.avg_price else None,
-                    "trend": "increasing" if change_amount > 0 else "decreasing"
-                })
-            
-            return trends
-            
+            for p in products:
+                current = p.get("current_price")
+                original = p.get("original_price") or current
+                if not current or not original:
+                    continue
+
+                change = current - original
+                pct = abs(change / original) * 100
+                if pct >= threshold_percentage:
+                    trends.append(
+                        {
+                            "product_id": p["id"],
+                            "product_name": p["name"],
+                            "platform": p.get("platform"),
+                            "category": p.get("category"),
+                            "current_price": current,
+                            "original_price": original,
+                            "change_amount": round(change, 2),
+                            "change_percentage": round(pct, 2),
+                            "trend": "increasing" if change > 0 else "decreasing",
+                        }
+                    )
+
+            trends.sort(key=lambda x: x["change_percentage"], reverse=True)
+            return trends[:limit]
+
         except Exception as e:
-            logger.error(f"Failed to get price change trends: {str(e)}")
-            raise
-    
-    async def get_platform_statistics(self) -> Dict[str, Any]:
-        """
-        Get statistics by platform
-        """
-        try:
-            # Count products by platform
-            platform_counts = self.db.query(
-                Product.platform,
-                func.count(Product.id).label('product_count'),
-                func.avg(Product.current_price).label('avg_price'),
-                func.min(Product.current_price).label('min_price'),
-                func.max(Product.current_price).label('max_price')
-            ).filter(
-                Product.is_active == True
-            ).group_by(Product.platform).all()
-            
-            # Count price changes by platform
-            recent_cutoff = datetime.utcnow() - timedelta(days=7)
-            platform_changes = self.db.query(
-                Product.platform,
-                func.count(Price.id).label('change_count')
-            ).join(Price, Product.id == Price.product_id).filter(
-                and_(
-                    Price.created_at >= recent_cutoff,
-                    Price.is_active == True,
-                    Product.is_active == True
-                )
-            ).group_by(Product.platform).all()
-            
-            # Format results
-            platforms = {}
-            for platform, product_count, avg_price, min_price, max_price in platform_counts:
-                platforms[platform] = {
-                    "product_count": product_count,
-                    "avg_price": round(avg_price, 2) if avg_price else None,
-                    "min_price": min_price,
-                    "max_price": max_price,
-                    "recent_changes": 0
-                }
-            
-            # Add change counts
-            for platform, change_count in platform_changes:
-                if platform in platforms:
-                    platforms[platform]["recent_changes"] = change_count
-            
-            return platforms
-            
-        except Exception as e:
-            logger.error(f"Failed to get platform statistics: {str(e)}")
-            return {}
-    
-    async def get_category_statistics(self) -> Dict[str, Any]:
-        """
-        Get statistics by category
-        """
-        try:
-            # Count products by category
-            category_counts = self.db.query(
-                Product.category,
-                func.count(Product.id).label('product_count'),
-                func.avg(Product.current_price).label('avg_price'),
-                func.min(Product.current_price).label('min_price'),
-                func.max(Product.current_price).label('max_price')
-            ).filter(
-                and_(
-                    Product.is_active == True,
-                    Product.category.isnot(None)
-                )
-            ).group_by(Product.category).all()
-            
-            # Count price changes by category
-            recent_cutoff = datetime.utcnow() - timedelta(days=7)
-            category_changes = self.db.query(
-                Product.category,
-                func.count(Price.id).label('change_count')
-            ).join(Price, Product.id == Price.product_id).filter(
-                and_(
-                    Price.created_at >= recent_cutoff,
-                    Price.is_active == True,
-                    Product.is_active == True,
-                    Product.category.isnot(None)
-                )
-            ).group_by(Product.category).all()
-            
-            # Format results
-            categories = {}
-            for category, product_count, avg_price, min_price, max_price in category_counts:
-                categories[category] = {
-                    "product_count": product_count,
-                    "avg_price": round(avg_price, 2) if avg_price else None,
-                    "min_price": min_price,
-                    "max_price": max_price,
-                    "recent_changes": 0
-                }
-            
-            # Add change counts
-            for category, change_count in category_changes:
-                if category in categories:
-                    categories[category]["recent_changes"] = change_count
-            
-            return categories
-            
-        except Exception as e:
-            logger.error(f"Failed to get category statistics: {str(e)}")
-            return {}
-    
+            logger.error(f"Failed to get Firestore price trends: {e}")
+            return []
+
+    # -----------------------------
+    # Overview / Platform / Category Stats
+    # -----------------------------
     async def get_monitoring_overview(self) -> Dict[str, Any]:
         """
-        Get overall monitoring statistics
+        Get overall monitoring summary (Firestore version)
         """
         try:
-            # Total counts
-            total_products = self.db.query(Product).filter(Product.is_active == True).count()
-            tracking_products = self.db.query(Product).filter(
-                and_(
-                    Product.is_active == True,
-                    Product.is_tracking == True
-                )
-            ).count()
-            
-            total_alerts = self.db.query(PriceAlert).count()
-            active_alerts = self.db.query(PriceAlert).filter(
-                PriceAlert.is_active == True
-            ).count()
-            
-            total_users = self.db.query(User).filter(User.is_active == True).count()
-            
-            # Recent activity
+            products = [doc.to_dict() for doc in self.products_ref.stream()]
+            alerts = [doc.to_dict() for doc in self.alerts_ref.stream()]
+            users = [doc.to_dict() for doc in self.users_ref.stream()]
+            prices = [doc.to_dict() for doc in self.prices_ref.stream()]
+
+            total_products = len(products)
+            tracking_products = len([p for p in products if p.get("is_tracking")])
+            total_alerts = len(alerts)
+            active_alerts = len([a for a in alerts if a.get("is_active")])
+            total_users = len(users)
             recent_cutoff = datetime.utcnow() - timedelta(days=7)
-            recent_price_changes = self.db.query(Price).filter(
-                and_(
-                    Price.created_at >= recent_cutoff,
-                    Price.is_active == True
-                )
-            ).count()
-            
-            recent_alerts_triggered = self.db.query(PriceAlert).filter(
-                and_(
-                    PriceAlert.triggered_at.like(f"{datetime.utcnow().date()}%"),
-                    PriceAlert.is_triggered == True
-                )
-            ).count()
-            
-            # Platform distribution
-            platform_stats = await self.get_platform_statistics()
-            
-            # Category distribution
-            category_stats = await self.get_category_statistics()
-            
+            recent_price_changes = len(
+                [
+                    pr
+                    for pr in prices
+                    if pr.get("created_at")
+                    and pr["created_at"] >= recent_cutoff
+                ]
+            )
+            recent_alerts_triggered = len(
+                [a for a in alerts if a.get("is_triggered")]
+            )
+
+            # Group by platform
+            platforms: Dict[str, Dict[str, Any]] = {}
+            for p in products:
+                platform = p.get("platform", "unknown")
+                price = p.get("current_price")
+                if not price:
+                    continue
+                platforms.setdefault(platform, {"count": 0, "prices": []})
+                platforms[platform]["count"] += 1
+                platforms[platform]["prices"].append(price)
+
+            platform_stats = {
+                k: {
+                    "product_count": v["count"],
+                    "avg_price": round(sum(v["prices"]) / len(v["prices"]), 2)
+                    if v["prices"]
+                    else None,
+                    "min_price": min(v["prices"]) if v["prices"] else None,
+                    "max_price": max(v["prices"]) if v["prices"] else None,
+                }
+                for k, v in platforms.items()
+            }
+
+            # Group by category
+            categories: Dict[str, Dict[str, Any]] = {}
+            for p in products:
+                cat = p.get("category", "Uncategorized")
+                price = p.get("current_price")
+                if not price:
+                    continue
+                categories.setdefault(cat, {"count": 0, "prices": []})
+                categories[cat]["count"] += 1
+                categories[cat]["prices"].append(price)
+
+            category_stats = {
+                k: {
+                    "product_count": v["count"],
+                    "avg_price": round(sum(v["prices"]) / len(v["prices"]), 2)
+                    if v["prices"]
+                    else None,
+                    "min_price": min(v["prices"]) if v["prices"] else None,
+                    "max_price": max(v["prices"]) if v["prices"] else None,
+                }
+                for k, v in categories.items()
+            }
+
             return {
                 "overview": {
                     "total_products": total_products,
@@ -427,12 +287,12 @@ class MonitoringService:
                     "active_alerts": active_alerts,
                     "total_users": total_users,
                     "recent_price_changes": recent_price_changes,
-                    "recent_alerts_triggered": recent_alerts_triggered
+                    "recent_alerts_triggered": recent_alerts_triggered,
                 },
                 "platforms": platform_stats,
-                "categories": category_stats
+                "categories": category_stats,
             }
-            
+
         except Exception as e:
-            logger.error(f"Failed to get monitoring overview: {str(e)}")
+            logger.error(f"Failed to get Firestore monitoring overview: {e}")
             return {}
