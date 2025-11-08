@@ -2,7 +2,7 @@
 Pydantic schemas for user-related API models
 """
 
-from pydantic import BaseModel, Field, EmailStr, validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, computed_field
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -11,22 +11,17 @@ class UserCreate(BaseModel):
     """Schema for creating a new user"""
     username: str = Field(..., min_length=3, max_length=50, description="Username")
     email: EmailStr = Field(..., description="Email address")
-    password: str = Field(..., min_length=8, max_length=100, description="Password")
+    password: str = Field(..., min_length=6, max_length=100, description="Password")
     first_name: Optional[str] = Field(None, max_length=50, description="First name")
     last_name: Optional[str] = Field(None, max_length=50, description="Last name")
     phone: Optional[str] = Field(None, max_length=20, description="Phone number")
     preferences: Optional[Dict[str, Any]] = Field(None, description="User preferences")
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        if not any(c.isupper() for c in v):
-            raise ValueError('Password must contain at least one uppercase letter')
-        if not any(c.islower() for c in v):
-            raise ValueError('Password must contain at least one lowercase letter')
-        if not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain at least one digit')
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters long')
         return v
 
 
@@ -49,19 +44,15 @@ class UserUpdate(BaseModel):
     language: Optional[str] = Field(None, max_length=5)
     preferences: Optional[Dict[str, Any]] = None
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
-        if v and len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        if v and not any(c.isupper() for c in v):
-            raise ValueError('Password must contain at least one uppercase letter')
-        if v and not any(c.islower() for c in v):
-            raise ValueError('Password must contain at least one lowercase letter')
-        if v and not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain at least one digit')
+        if v and len(v) < 6:
+            raise ValueError('Password must be at least 6 characters long')
         return v
     
-    @validator('preferred_currency')
+    @field_validator('preferred_currency')
+    @classmethod
     def validate_currency(cls, v):
         if v and len(v) != 3:
             raise ValueError('Currency must be a 3-letter code')
@@ -96,8 +87,16 @@ class UserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    # Computed fields
-    full_name: Optional[str] = None
+    @computed_field
+    def full_name(self) -> Optional[str]:
+        """Compute full name from first_name and last_name"""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        return None
     
     class Config:
         from_attributes = True
@@ -123,18 +122,13 @@ class TokenResponse(BaseModel):
 class PasswordChange(BaseModel):
     """Schema for password change"""
     old_password: str = Field(..., description="Current password")
-    new_password: str = Field(..., min_length=8, max_length=100, description="New password")
+    new_password: str = Field(..., min_length=6, max_length=100, description="New password")
     
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        if not any(c.isupper() for c in v):
-            raise ValueError('Password must contain at least one uppercase letter')
-        if not any(c.islower() for c in v):
-            raise ValueError('Password must contain at least one lowercase letter')
-        if not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain at least one digit')
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters long')
         return v
 
 
@@ -146,16 +140,11 @@ class PasswordReset(BaseModel):
 class PasswordResetConfirm(BaseModel):
     """Schema for password reset confirmation"""
     token: str = Field(..., description="Reset token")
-    new_password: str = Field(..., min_length=8, max_length=100, description="New password")
+    new_password: str = Field(..., min_length=6, max_length=100, description="New password")
     
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        if not any(c.isupper() for c in v):
-            raise ValueError('Password must contain at least one uppercase letter')
-        if not any(c.islower() for c in v):
-            raise ValueError('Password must contain at least one lowercase letter')
-        if not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain at least one digit')
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters long')
         return v

@@ -37,7 +37,16 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     
     # CORS settings
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080"]
+    # Add your frontend URLs here (comma-separated or JSON array)
+    # Default includes common development ports
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://localhost:5173",  # Vite default port
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:5173",
+    ]
     
     # Price monitoring settings
     PRICE_CHECK_INTERVAL: int = 3600  # 1 hour in seconds

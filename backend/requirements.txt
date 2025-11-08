@@ -6,6 +6,7 @@ uvicorn[standard]>=0.32.0
 SQLAlchemy>=2.0.44
 alembic>=1.14.0
 pymysql>=1.1.1
+firebase-admin>=7.1.0
 
 # Data handling
 pandas>=2.2.3

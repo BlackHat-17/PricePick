@@ -68,6 +68,7 @@ app = FastAPI(
 )
 
 # Configure CORS
+# Allow configured origins with credentials support
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
