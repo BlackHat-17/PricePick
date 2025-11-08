@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
 Simple run script for PricePick backend
+Runs main.py directly without subprocess
 """
 
 import os
 import sys
-import subprocess
-from pathlib import Path
 
 def main():
     """Run the PricePick backend"""
@@ -17,30 +16,34 @@ def main():
         print("❌ main.py not found. Please run this script from the backend directory.")
         sys.exit(1)
     
-    # Check if virtual environment exists
-    if not os.path.exists("venv"):
-        print("❌ Virtual environment not found. Please run setup.py first.")
-        sys.exit(1)
+    # Add current directory to path to ensure imports work
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, backend_dir)
+    os.chdir(backend_dir)
     
-    # Determine Python executable
-    if os.name == 'nt':  # Windows
-        python_exec = "venv\\Scripts\\python"
-    else:  # Unix/Linux/MacOS
-        python_exec = "venv/bin/python"
-    
-    # Check if Python executable exists
-    if not os.path.exists(python_exec):
-        print(f"❌ Python executable not found at {python_exec}")
-        sys.exit(1)
-    
-    # Run the application
+    # Import and run main module directly
     try:
         print("🔄 Starting server...")
-        subprocess.run([python_exec, "main.py"], check=True)
+        # Import main module to get the app and settings
+        import main
+        from config import settings
+        import uvicorn
+        
+        # Run uvicorn directly (same as main.py's __main__ block)
+        uvicorn.run(
+            "main:app",
+            host=settings.HOST,
+            port=settings.PORT,
+            reload=settings.DEBUG,
+            log_level="info"
+        )
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
-    except subprocess.CalledProcessError as e:
+        sys.exit(0)
+    except Exception as e:
         print(f"❌ Server failed to start: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":

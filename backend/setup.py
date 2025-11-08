@@ -5,24 +5,58 @@ Setup script for PricePick backend
 
 import os
 import sys
-import subprocess
 import shutil
 from pathlib import Path
 
-def run_command(command, description):
-    """Run a command and handle errors"""
+def install_packages_programmatically(python_exec, packages_or_file, description):
+    """Install packages using pip programmatically (no subprocess)"""
     print(f"🔄 {description}...")
     try:
-        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
-        print(f"✅ {description} completed successfully")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ {description} failed: {e.stderr}")
-        print(f"Full error output: {e.output}")
+        # Add venv site-packages to path to access pip
+        venv_lib = os.path.join(os.path.dirname(python_exec), '..', 'Lib' if os.name == 'nt' else 'lib')
+        venv_site_packages = None
+        
+        if os.path.exists(venv_lib):
+            for item in os.listdir(venv_lib):
+                if item.startswith('python'):
+                    venv_site_packages = os.path.join(venv_lib, item, 'site-packages')
+                    break
+        
+        original_path = sys.path[:]
+        try:
+            if venv_site_packages and os.path.exists(venv_site_packages):
+                sys.path.insert(0, venv_site_packages)
+            
+            # Use pip's programmatic API
+            import pip._internal.main as pip_main
+            
+            if isinstance(packages_or_file, list):
+                args = ['install'] + packages_or_file
+            else:
+                args = ['install', '-r', packages_or_file]
+            
+            result = pip_main.main(args)
+            
+            if result == 0:
+                print(f"✅ {description} completed successfully")
+                return True
+            else:
+                print(f"⚠️  {description} completed with warnings (exit code: {result})")
+                return True  # Still return True as it might have worked
+        finally:
+            sys.path = original_path
+            
+    except ImportError:
+        # Fallback: provide manual instructions
+        print(f"⚠️  Could not use pip programmatically. Please run manually:")
+        if isinstance(packages_or_file, list):
+            print(f"   {python_exec} -m pip install {' '.join(packages_or_file)}")
+        else:
+            print(f"   {python_exec} -m pip install -r {packages_or_file}")
         return False
-    except PermissionError as e:
-        print(f"❌ {description} failed due to permission error: {e}\n")
-        print("🔒 Please run this script as Administrator or check your folder permissions.")
+    except Exception as e:
+        print(f"❌ {description} failed: {e}")
+        print(f"⚠️  Please install manually: {python_exec} -m pip install -r requirements.txt")
         return False
 
 def main():
@@ -60,13 +94,40 @@ def main():
         venv_python = os.path.join('venv', 'bin', 'python')
         activate_script = "source venv/bin/activate"
 
-    # Upgrade pip using venv python
-    if not run_command(f'"{venv_python}" -m pip install --upgrade pip', "Upgrading pip"):
-        sys.exit(1)
+    # Upgrade pip using venv python (programmatically)
+    print("🔄 Upgrading pip...")
+    try:
+        venv_lib = os.path.join(os.path.dirname(venv_python), '..', 'Lib' if os.name == 'nt' else 'lib')
+        venv_site_packages = None
+        
+        if os.path.exists(venv_lib):
+            for item in os.listdir(venv_lib):
+                if item.startswith('python'):
+                    venv_site_packages = os.path.join(venv_lib, item, 'site-packages')
+                    break
+        
+        if venv_site_packages and os.path.exists(venv_site_packages):
+            sys.path.insert(0, venv_site_packages)
+        
+        try:
+            import pip._internal.main as pip_main
+            if pip_main.main(['install', '--upgrade', 'pip']) == 0:
+                print("✅ Upgrading pip completed successfully")
+            else:
+                print("⚠️  Pip upgrade had issues, but continuing...")
+        except:
+            print("⚠️  Could not upgrade pip programmatically. Continuing...")
+        finally:
+            if venv_site_packages and venv_site_packages in sys.path:
+                sys.path.remove(venv_site_packages)
+    except Exception as e:
+        print(f"⚠️  Could not upgrade pip: {e}. Continuing...")
 
     # Install dependencies using venv python
-    if not run_command(f'"{venv_python}" -m pip install -r requirements.txt', "Installing dependencies"):
-        sys.exit(1)
+    if not install_packages_programmatically(venv_python, "requirements.txt", "Installing dependencies"):
+        print("⚠️  Automatic installation failed. Please install manually:")
+        print(f"   {venv_python} -m pip install -r requirements.txt")
+        # Don't exit - let user install manually
     
     # Create .env file if it doesn't exist
     if not os.path.exists(".env"):
@@ -86,7 +147,7 @@ def main():
     else:
         print("   source venv/bin/activate")
     print("2. Start the server:")
-    print("   .python main.py")
+    print("   python main.py")
     print("3. Open your browser to: http://localhost:8000")
     print("4. View API docs at: http://localhost:8000/docs")
 

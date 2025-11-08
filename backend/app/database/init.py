@@ -81,42 +81,64 @@ async def run_initialization_scripts():
 async def create_indexes():
     """
     Create additional database indexes for better performance
+    MySQL doesn't support IF NOT EXISTS in CREATE INDEX, so we check if index exists first
     """
     try:
         db = SessionLocal()
         
+        # Helper function to check if index exists (MySQL compatible)
+        def index_exists(index_name: str) -> bool:
+            try:
+                result = db.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.statistics "
+                    "WHERE table_schema = DATABASE() AND index_name = :index_name"
+                ), {"index_name": index_name})
+                return result.scalar() > 0
+            except Exception:
+                return False
+        
         # Create composite indexes for common queries
         indexes = [
             # Product indexes
-            "CREATE INDEX IF NOT EXISTS idx_products_platform_tracking ON products(platform, is_tracking, is_active)",
-            "CREATE INDEX IF NOT EXISTS idx_products_category_brand ON products(category, brand, is_active)",
+            ("idx_products_platform_tracking", "CREATE INDEX idx_products_platform_tracking ON products(platform, is_tracking, is_active)"),
+            ("idx_products_category_brand", "CREATE INDEX idx_products_category_brand ON products(category, brand, is_active)"),
             
             # Price indexes
-            "CREATE INDEX IF NOT EXISTS idx_prices_product_created ON prices(product_id, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_prices_currency_available ON prices(currency, is_available, is_active)",
+            ("idx_prices_product_created", "CREATE INDEX idx_prices_product_created ON prices(product_id, created_at DESC)"),
+            ("idx_prices_currency_available", "CREATE INDEX idx_prices_currency_available ON prices(currency, is_available, is_active)"),
             
             # User indexes
-            "CREATE INDEX IF NOT EXISTS idx_users_email_active ON users(email, is_active)",
-            "CREATE INDEX IF NOT EXISTS idx_users_username_active ON users(username, is_active)",
+            ("idx_users_email_active", "CREATE INDEX idx_users_email_active ON users(email, is_active)"),
+            ("idx_users_username_active", "CREATE INDEX idx_users_username_active ON users(username, is_active)"),
             
             # Alert indexes
-            "CREATE INDEX IF NOT EXISTS idx_alerts_user_active ON price_alerts(user_id, is_active, alert_type)",
-            "CREATE INDEX IF NOT EXISTS idx_alerts_product_active ON price_alerts(product_id, is_active)",
+            ("idx_alerts_user_active", "CREATE INDEX idx_alerts_user_active ON price_alerts(user_id, is_active, alert_type)"),
+            ("idx_alerts_product_active", "CREATE INDEX idx_alerts_product_active ON price_alerts(product_id, is_active)"),
             
             # History indexes
-            "CREATE INDEX IF NOT EXISTS idx_history_product_created ON price_history(product_id, created_at DESC)",
+            ("idx_history_product_created", "CREATE INDEX idx_history_product_created ON price_history(product_id, created_at DESC)"),
             
             # Session indexes
-            "CREATE INDEX IF NOT EXISTS idx_sessions_product_status ON scraping_sessions(product_id, status, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_sessions_platform_success ON scraping_sessions(platform, success, created_at DESC)",
+            ("idx_sessions_product_status", "CREATE INDEX idx_sessions_product_status ON scraping_sessions(product_id, status, created_at DESC)"),
+            ("idx_sessions_platform_success", "CREATE INDEX idx_sessions_platform_success ON scraping_sessions(platform, success, created_at DESC)"),
         ]
         
-        for index_sql in indexes:
+        for index_name, index_sql in indexes:
             try:
-                db.execute(text(index_sql))
-                db.commit()
+                # Check if index already exists (MySQL doesn't support IF NOT EXISTS)
+                if not index_exists(index_name):
+                    db.execute(text(index_sql))
+                    db.commit()
+                    logger.debug(f"Created index: {index_name}")
+                else:
+                    logger.debug(f"Index already exists: {index_name}")
             except Exception as e:
-                logger.warning(f"Failed to create index: {e}")
+                # If index already exists, MySQL will raise an error - that's okay
+                error_str = str(e).lower()
+                if "duplicate key name" in error_str or "already exists" in error_str:
+                    logger.debug(f"Index {index_name} already exists, skipping")
+                else:
+                    logger.warning(f"Failed to create index {index_name}: {e}")
                 db.rollback()
         
         db.close()

@@ -11,7 +11,7 @@ import logging
 from typing import List
 
 from app.routes import products, prices, users, monitoring, search
-from app.database import init_db
+from app.database import init_db, get_db_session
 from app.services.price_monitor import PriceMonitorService
 from app.tasks.scheduler import TaskScheduler
 from config import settings
@@ -33,9 +33,16 @@ async def lifespan(app: FastAPI):
     logger.info("Starting PricePick backend...")
     await init_db()
     
-    # Initialize price monitoring service
-    price_monitor = PriceMonitorService()
-    app.state.price_monitor = price_monitor
+    # Initialize price monitoring service (it will get its own db sessions when needed)
+    # Create a db session for initialization - the service manages its own sessions for operations
+    db = get_db_session()
+    try:
+        price_monitor = PriceMonitorService(db)
+        app.state.price_monitor = price_monitor
+    except Exception as e:
+        logger.error(f"Failed to initialize price monitor service: {e}")
+        db.close()
+        raise
     
     # Start background task scheduler
     scheduler = TaskScheduler()
